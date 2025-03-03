@@ -1,5 +1,7 @@
 import requests
 import pandas as pd
+import fetch_crypto_data
+import ping_api
 
 # Fungsi untuk mengambil data pasar cryptocurrency
 def fetch_crypto_data(vs_currency='usd', per_page=10, page=1):
