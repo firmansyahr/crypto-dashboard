@@ -3,11 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from data_fetch import fetch_crypto_data, ping_api
 
-st.title("Cryptocurrency Dashboard")
+st.title("Cryptocurrency Analysis Dashboard - Group 1")
 
-# Uji koneksi API dengan endpoint ping
-ping_result = ping_api()
-st.write("Ping API Result:", ping_result)
 
 # Ambil data pasar cryptocurrency
 df = fetch_crypto_data(per_page=10)
@@ -24,4 +21,7 @@ ax.set_title('Harga Terkini Cryptocurrency')
 plt.xticks(rotation=45)
 st.pyplot(fig)
 
+# Uji koneksi API dengan endpoint ping
+ping_result = ping_api()
+st.write("Ping API Result:", ping_result)
 st.markdown("Data diambil dari [CoinGecko](https://www.coingecko.com/).")
