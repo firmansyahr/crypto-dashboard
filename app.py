@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from data_fetch import fetch_crypto_data, ping_api
 
-st.title("Cryptocurrency Analysis Dashboard - Group 1")
+st.title("Cryptocurrency Analysis Dashboard")
 
 
 # Ambil data pasar cryptocurrency
