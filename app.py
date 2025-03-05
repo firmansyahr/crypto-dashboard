@@ -15,14 +15,11 @@ from data_fetch import (
 ##################################
 # Fungsi ARIMA dengan opsi log, musiman, dan drift
 ##################################
-def predict_arima(prices, forecast_period=7, use_log=False, seasonal=False, m=7):
-    # Transformasi data jika diinginkan
-    if use_log:
-        prices_transformed = np.log(prices)
-    else:
-        prices_transformed = prices
+def predict_arima(prices, forecast_period=7, use_log=True, seasonal=True, m=7):
+    # Transformasi data dengan log (selalu true)
+    prices_transformed = np.log(prices)
 
-    # Membangun model ARIMA/SARIMA dengan tambahan trend (drift) untuk menangkap tren jika ada
+    # Membangun model ARIMA/SARIMA dengan tambahan trend (drift)
     model = auto_arima(
         prices_transformed,
         start_p=1, start_q=1,
@@ -37,11 +34,8 @@ def predict_arima(prices, forecast_period=7, use_log=False, seasonal=False, m=7)
     )
     forecast_transformed = model.predict(n_periods=forecast_period)
 
-    # Kembalikan ke skala asli jika menggunakan log
-    if use_log:
-        forecast = np.exp(forecast_transformed)
-    else:
-        forecast = forecast_transformed
+    # Kembalikan ke skala asli dengan eksponensial
+    forecast = np.exp(forecast_transformed)
 
     model_summary = model.summary().as_text()
     return forecast, model_summary
@@ -80,13 +74,11 @@ else:
 selected_coin = st.sidebar.selectbox("Pilih Coin:", coin_options, index=0)
 st.write(f"Coin yang dipilih: {selected_coin.capitalize()}")
 
-# 2. Opsi Tambahan
-use_log_transform = st.sidebar.checkbox("Gunakan Transformasi Log", value=False)
-use_seasonal = st.sidebar.checkbox("Gunakan Musiman (SARIMA)?", value=False)
-# Catatan: Jika data aslinya per jam, sesuaikan m (misal: 24 untuk harian atau 168 untuk mingguan)
-seasonal_period = st.sidebar.number_input("Panjang Periode Musiman (m):", min_value=1, value=7)
-# Opsi resampling ke harian
-resample_daily = st.sidebar.checkbox("Resample data ke harian?", value=True)
+# Opsi tambahan tidak ditampilkan di sidebar karena log, seasonal, dan resampling harian selalu aktif
+use_log_transform = True
+use_seasonal = True
+seasonal_period = 7
+resample_daily = True
 
 # 3. Harga Saat Ini (Simple Price)
 st.header(f"Harga Saat Ini - {selected_coin.capitalize()}")
@@ -127,7 +119,7 @@ if market_chart_data and "prices" in market_chart_data:
     # --- Persiapan Data untuk Prediksi ---
     df_prices = df_prices.sort_index()
     if resample_daily:
-        # Resample ke frekuensi harian agar periode musiman (m) menjadi relevan (misalnya m=7 untuk seminggu)
+        # Resample ke frekuensi harian
         df_prices_resampled = df_prices.resample('D').mean()
     else:
         df_prices_resampled = df_prices
@@ -161,7 +153,7 @@ if market_chart_data and "prices" in market_chart_data:
             ax.plot(forecast_dates, forecast, label="Prediksi ARIMA", color="red", marker="o")
             ax.set_xlabel("Tanggal")
         else:
-            # Data masih berupa datetime, hitung frekuensi berdasarkan selisih antara dua titik terakhir
+            # Jika tidak disample, hitung frekuensi berdasarkan selisih antara dua titik terakhir
             last_date = prices_series.index[-1]
             if len(prices_series.index) >= 2:
                 freq = prices_series.index[-1] - prices_series.index[-2]
