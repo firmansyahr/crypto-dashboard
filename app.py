@@ -84,7 +84,7 @@ def predict_lstm(prices, forecast_period=7, n_steps=10, epochs=50):
     model.fit(X, y, epochs=epochs, verbose=0)
     
     # Prediksi secara berulang
-    forecast_input = scaled_data[-n_steps:].reshape(1, n_steps, 1)
+    forecast_input = np.concatenate((forecast_input[:, 1:, :], pred.reshape(1, 1, 1)), axis=1)
     forecast_scaled = []
     for _ in range(forecast_period):
         pred = model.predict(forecast_input, verbose=0)
