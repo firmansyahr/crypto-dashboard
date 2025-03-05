@@ -9,7 +9,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 import io
 
-# Import fungsi-fungsi untuk mengambil data dari CoinGecko
+# Import fungsi untuk mengambil data dari CoinGecko
 from data_fetch import (
     fetch_coins_list,
     fetch_simple_price,
@@ -54,7 +54,7 @@ def predict_expsmoothing(prices, forecast_period=7, seasonal_periods=7):
     return forecast, model_fit.summary()
 
 ##################################
-# Fungsi Prediksi dengan LSTM
+# Fungsi untuk Membuat Sequences untuk LSTM
 ##################################
 def create_sequences(data, n_steps):
     X, y = [], []
@@ -63,6 +63,9 @@ def create_sequences(data, n_steps):
         y.append(data[i+n_steps])
     return np.array(X), np.array(y)
 
+##################################
+# Fungsi untuk Membangun Model LSTM
+##################################
 def build_lstm_model(input_shape):
     model = Sequential()
     model.add(LSTM(50, activation='relu', input_shape=input_shape))
@@ -70,8 +73,11 @@ def build_lstm_model(input_shape):
     model.compile(optimizer='adam', loss='mse')
     return model
 
+##################################
+# Fungsi Prediksi dengan LSTM
+##################################
 def predict_lstm(prices, forecast_period=7, n_steps=10, epochs=50):
-    # Ubah data ke bentuk numpy array dan scaling (normalisasi)
+    # Ubah data ke array dan scaling
     data = np.array(prices).reshape(-1, 1)
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data)
@@ -83,15 +89,17 @@ def predict_lstm(prices, forecast_period=7, n_steps=10, epochs=50):
     model = build_lstm_model((n_steps, 1))
     model.fit(X, y, epochs=epochs, verbose=0)
     
-    # Prediksi secara berulang
-    forecast_input = np.concatenate((forecast_input[:, 1:, :], pred.reshape(1, 1, 1)), axis=1)
+    # Inisialisasi forecast_input dengan n_steps data terakhir
+    forecast_input = scaled_data[-n_steps:].reshape(1, n_steps, 1)
     forecast_scaled = []
+    
     for _ in range(forecast_period):
         pred = model.predict(forecast_input, verbose=0)
-        forecast_scaled.append(pred[0,0])
-        forecast_input = np.append(forecast_input[:, 1:, :], [[pred]], axis=1)
+        forecast_scaled.append(pred[0, 0])
+        # Update forecast_input: hapus data pertama dan tambahkan pred baru
+        forecast_input = np.concatenate((forecast_input[:, 1:, :], pred.reshape(1, 1, 1)), axis=1)
     
-    forecast = scaler.inverse_transform(np.array(forecast_scaled).reshape(-1,1)).flatten()
+    forecast = scaler.inverse_transform(np.array(forecast_scaled).reshape(-1, 1)).flatten()
     
     summary_io = io.StringIO()
     model.summary(print_fn=lambda x: summary_io.write(x + "\n"))
@@ -104,8 +112,9 @@ def predict_lstm(prices, forecast_period=7, n_steps=10, epochs=50):
 ##################################
 def generate_recommendation(current_price, last_forecast, threshold=0.02):
     """
-    Menghasilkan rekomendasi berdasarkan perbandingan harga saat ini dengan nilai prediksi periode terakhir.
-    threshold: jika perbedaan relatif kurang dari 2%, rekomendasi Tahan.
+    Jika perbedaan relatif kurang dari threshold, rekomendasi Tahan.
+    Jika nilai prediksi periode terakhir > harga saat ini: Beli.
+    Jika nilai prediksi periode terakhir < harga saat ini: Jual.
     """
     if abs(last_forecast - current_price) / current_price < threshold:
         return "Rekomendasi: Tahan (perubahan harga tidak signifikan)"
@@ -119,7 +128,7 @@ def generate_recommendation(current_price, last_forecast, threshold=0.02):
 ##################################
 st.title("Analytics Cryptocurrency: ARIMA, Exponential Smoothing & LSTM")
 
-# 1. Pengaturan: Pilihan Coin
+# 1. Pilihan Coin (Sidebar)
 st.sidebar.header("Pengaturan")
 allowed_coins = [
     "bitcoin", "ethereum", "tether", "ripple", "binancecoin", "solana",
@@ -128,7 +137,7 @@ allowed_coins = [
     "shiba-inu", "pepe", "trump", "ton-crystal", "hype", "monero"
 ]
 coins_data = fetch_coins_list()
-if coins_data:
+if coins_data is not None:
     df_coins = pd.DataFrame(coins_data)
     df_coins_filtered = df_coins[df_coins["id"].isin(allowed_coins)]
     coin_options = df_coins_filtered["id"].tolist() if not df_coins_filtered.empty else allowed_coins
@@ -139,7 +148,7 @@ else:
 selected_coin = st.sidebar.selectbox("Pilih Coin:", coin_options, index=0)
 st.write(f"Coin yang dipilih: {selected_coin.capitalize()}")
 
-# Opsi forecasting ditetapkan secara default:
+# Opsi forecasting sudah ditetapkan secara default:
 use_log_transform = True
 use_seasonal = True
 seasonal_period = 7
@@ -157,7 +166,7 @@ else:
 # 3. Data Pasar (Coin Markets)
 st.header("Data Pasar Cryptocurrency")
 df_markets = fetch_coin_markets(per_page=200)
-if not df_markets.empty:
+if df_markets is not None and not df_markets.empty:
     df_selected = df_markets[df_markets["id"] == selected_coin]
     if df_selected.empty:
         st.warning(f"Tidak menemukan data pasar untuk {selected_coin}.")
@@ -181,7 +190,7 @@ if market_chart_data and "prices" in market_chart_data:
     st.subheader(f"Grafik Harga {selected_coin.capitalize()} (USD) - {days_option} Hari Terakhir")
     st.line_chart(df_prices["price"])
     
-    # Persiapan data: resampling ke harian
+    # Resample ke harian
     df_prices = df_prices.sort_index()
     if resample_daily:
         df_prices_resampled = df_prices.resample('D').mean()
@@ -231,7 +240,7 @@ if market_chart_data and "prices" in market_chart_data:
         with st.expander("Ringkasan Model LSTM"):
             st.text(lstm_summary)
         
-        # Visualisasi: Tentukan tanggal prediksi berdasarkan tanggal terakhir data historis
+        # Visualisasi Prediksi (menggunakan ARIMA sebagai contoh)
         fig, ax = plt.subplots(figsize=(10,6))
         last_date = prices_series.index[-1]
         forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_period)
@@ -265,7 +274,6 @@ if market_chart_data and "prices" in market_chart_data:
         st.pyplot(fig3)
         
         # --- Rekomendasi Preskriptif ---
-        # Menggunakan nilai prediksi periode terakhir dari model ARIMA sebagai contoh
         last_forecast_value = forecast_arima[-1]
         recommendation = generate_recommendation(current_price, last_forecast_value)
         st.write(f"Harga saat ini: {current_price:.2f} USD")
@@ -276,7 +284,7 @@ if market_chart_data and "prices" in market_chart_data:
 else:
     st.warning("Gagal mengambil data historis untuk coin yang dipilih.")
 
-# 5. Daftar Semua Coins (Opsional)
+# Daftar Semua Coins (Opsional)
 st.header("Daftar Semua Coins")
 coins_list = fetch_coins_list()
 if coins_list:
