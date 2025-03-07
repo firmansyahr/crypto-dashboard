@@ -1,10 +1,24 @@
+# Streamlit untuk tampilan dashboard
 streamlit>=1.15.0
+
+# Data processing & visualization
 pandas>=1.3.0
 matplotlib>=3.5.0
 numpy==1.23.5
-pmdarima>=1.8.2
-requests>=2.25.0
 scipy>=1.7.0
-scikit-learn>=1.0.0
+seaborn>=0.11.2
+
+# Time series forecasting
+pmdarima>=1.8.2
 statsmodels>=0.13.0
-tensorflow>=2.11.0
+
+# HTTP requests untuk pengambilan data dari API CoinGecko
+requests>=2.25.0
+
+# Machine Learning dan Data Scaling (jika diperlukan untuk preprocessing)
+scikit-learn>=1.0.0
+
+# Pyomo untuk optimasi MILP
+pyomo>=6.0.0
+
+# Solver GLPK (pastikan GLPK diinstal secara terpisah, tidak melalui pip)
