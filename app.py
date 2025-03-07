@@ -4,9 +4,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pmdarima import auto_arima
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
 import io
 
 # Import fungsi untuk mengambil data dari CoinGecko
@@ -24,7 +21,6 @@ def predict_arima(prices, forecast_period=7, use_log=True, seasonal=True, m=7):
     # Lakukan transformasi log (selalu aktif)
     prices_transformed = np.log(prices)
     
-    # Bangun model SARIMA dengan komponen non-musiman dan musiman
     model = auto_arima(
         prices_transformed,
         start_p=1, start_q=1,
@@ -54,68 +50,59 @@ def predict_expsmoothing(prices, forecast_period=7, seasonal_periods=7):
     return forecast, model_fit.summary()
 
 ##################################
-# Fungsi untuk Membuat Sequences untuk LSTM
+# Fungsi Optimasi dengan MILP menggunakan Pyomo
 ##################################
-def create_sequences(data, n_steps):
-    X, y = [], []
-    for i in range(len(data) - n_steps):
-        X.append(data[i:i+n_steps])
-        y.append(data[i+n_steps])
-    return np.array(X), np.array(y)
+from pyomo.environ import ConcreteModel, Var, Objective, Constraint, Binary, SolverFactory, maximize, value
+
+def optimize_decision(current_price, forecast, threshold=0.02):
+    """
+    Mengoptimalkan keputusan beli/jual/tahan berdasarkan:
+      - Jika forecast >= current_price*(1+threshold)  => Beli
+      - Jika forecast <= current_price*(1-threshold)  => Jual
+      - Jika forecast di antara kedua nilai tersebut  => Tahan
+    Model ini memaksimalkan profit yang didefinisikan sebagai:
+      profit = (forecast - current_price) untuk beli, 
+      profit = (current_price - forecast) untuk jual, dan 0 untuk tahan.
+    """
+    model = ConcreteModel()
+    # Variabel biner untuk keputusan: b (Beli), s (Jual), h (Tahan)
+    model.b = Var(domain=Binary)
+    model.s = Var(domain=Binary)
+    model.h = Var(domain=Binary)
+    
+    # Hanya satu keputusan yang aktif
+    model.one = Constraint(expr=model.b + model.s + model.h == 1)
+    
+    M = 1e6  # Big-M constant
+    T = threshold
+    
+    # Constraint untuk keputusan beli
+    model.buy_constraint = Constraint(expr= forecast - current_price >= current_price * T - M*(1 - model.b))
+    # Constraint untuk keputusan jual
+    model.sell_constraint = Constraint(expr= current_price - forecast >= current_price * T - M*(1 - model.s))
+    # Constraint untuk keputusan tahan
+    model.hold_constraint1 = Constraint(expr= forecast - current_price <= M*(1 - model.h) + current_price * T)
+    model.hold_constraint2 = Constraint(expr= current_price - forecast <= M*(1 - model.h) + current_price * T)
+    
+    # Objective: Maksimalkan profit
+    model.profit = Objective(expr= model.b*(forecast - current_price) + model.s*(current_price - forecast), sense=maximize)
+    
+    solver = SolverFactory('glpk')
+    solver.solve(model, tee=False)
+    
+    if value(model.b) > 0.5:
+        decision = "Beli"
+    elif value(model.s) > 0.5:
+        decision = "Jual"
+    else:
+        decision = "Tahan"
+    profit = value(model.profit)
+    return decision, profit
 
 ##################################
-# Fungsi untuk Membangun Model LSTM
-##################################
-def build_lstm_model(input_shape):
-    model = Sequential()
-    model.add(LSTM(50, activation='relu', input_shape=input_shape))
-    model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mse')
-    return model
-
-##################################
-# Fungsi Prediksi dengan LSTM
-##################################
-def predict_lstm(prices, forecast_period=7, n_steps=10, epochs=50):
-    # Ubah data ke array dan scaling
-    data = np.array(prices).reshape(-1, 1)
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data)
-    
-    # Buat sequence untuk pelatihan
-    X, y = create_sequences(scaled_data, n_steps)
-    X = X.reshape((X.shape[0], X.shape[1], 1))
-    
-    model = build_lstm_model((n_steps, 1))
-    model.fit(X, y, epochs=epochs, verbose=0)
-    
-    # Inisialisasi forecast_input dengan n_steps data terakhir
-    forecast_input = scaled_data[-n_steps:].reshape(1, n_steps, 1)
-    forecast_scaled = []
-    
-    for _ in range(forecast_period):
-        pred = model.predict(forecast_input, verbose=0)
-        forecast_scaled.append(pred[0, 0])
-        # Update forecast_input: hapus data pertama dan tambahkan pred baru
-        forecast_input = np.concatenate((forecast_input[:, 1:, :], pred.reshape(1, 1, 1)), axis=1)
-    
-    forecast = scaler.inverse_transform(np.array(forecast_scaled).reshape(-1, 1)).flatten()
-    
-    summary_io = io.StringIO()
-    model.summary(print_fn=lambda x: summary_io.write(x + "\n"))
-    lstm_summary = summary_io.getvalue()
-    
-    return forecast, lstm_summary
-
-##################################
-# Fungsi Rekomendasi Preskriptif
+# Fungsi Rekomendasi Preskriptif Non-Optimasi
 ##################################
 def generate_recommendation(current_price, last_forecast, threshold=0.02):
-    """
-    Jika perbedaan relatif kurang dari threshold, rekomendasi Tahan.
-    Jika nilai prediksi periode terakhir > harga saat ini: Beli.
-    Jika nilai prediksi periode terakhir < harga saat ini: Jual.
-    """
     if abs(last_forecast - current_price) / current_price < threshold:
         return "Rekomendasi: Tahan (perubahan harga tidak signifikan)"
     elif last_forecast > current_price:
@@ -126,9 +113,9 @@ def generate_recommendation(current_price, last_forecast, threshold=0.02):
 ##################################
 # Tampilan Dashboard dengan Streamlit
 ##################################
-st.title("Analytics Cryptocurrency: ARIMA, Exponential Smoothing & LSTM")
+st.title("Analytics Cryptocurrency: Forecasting & Optimasi Keputusan")
 
-# 1. Pilihan Coin (Sidebar)
+# Pilihan Coin (Sidebar)
 st.sidebar.header("Pengaturan")
 allowed_coins = [
     "bitcoin", "ethereum", "tether", "ripple", "binancecoin", "solana",
@@ -154,7 +141,7 @@ use_seasonal = True
 seasonal_period = 7
 resample_daily = True
 
-# 2. Harga Saat Ini (Simple Price)
+# Harga Saat Ini (Simple Price)
 st.header(f"Harga Saat Ini - {selected_coin.capitalize()}")
 price_data = fetch_simple_price(selected_coin, "usd")
 if price_data and selected_coin in price_data:
@@ -163,7 +150,7 @@ if price_data and selected_coin in price_data:
 else:
     st.warning("Gagal mengambil data harga sederhana.")
 
-# 3. Data Pasar (Coin Markets)
+# Data Pasar (Coin Markets)
 st.header("Data Pasar Cryptocurrency")
 df_markets = fetch_coin_markets(per_page=200)
 if df_markets is not None and not df_markets.empty:
@@ -177,7 +164,7 @@ if df_markets is not None and not df_markets.empty:
 else:
     st.error("Gagal mengambil data pasar.")
 
-# 4. Data Historis & Visualisasi
+# Data Historis & Visualisasi
 st.header("Data Historis & Prediksi Harga")
 days_option = st.selectbox("Pilih Rentang Hari Historis:", [7, 14, 30, 90, 180, 365], index=2)
 market_chart_data = fetch_market_chart(selected_coin, days=days_option)
@@ -227,19 +214,6 @@ if market_chart_data and "prices" in market_chart_data:
         with st.expander("Ringkasan Model Exponential Smoothing"):
             st.text(model_summary_es)
         
-        # Prediksi dengan LSTM
-        forecast_lstm, lstm_summary = predict_lstm(
-            prices_series,
-            forecast_period=forecast_period,
-            n_steps=10,
-            epochs=50
-        )
-        st.subheader("Prediksi dengan LSTM")
-        st.write(f"Prediksi untuk {forecast_period} hari ke depan:")
-        st.write(forecast_lstm)
-        with st.expander("Ringkasan Model LSTM"):
-            st.text(lstm_summary)
-        
         # Visualisasi Prediksi (menggunakan ARIMA sebagai contoh)
         fig, ax = plt.subplots(figsize=(10,6))
         last_date = prices_series.index[-1]
@@ -253,44 +227,23 @@ if market_chart_data and "prices" in market_chart_data:
         plt.tight_layout()
         st.pyplot(fig)
         
-        fig2, ax2 = plt.subplots(figsize=(10,6))
-        ax2.plot(prices_series.index, prices_series, label="Data Historis")
-        ax2.plot(forecast_dates, forecast_es, label="Prediksi Exponential Smoothing", color="green", marker="o")
-        ax2.set_xlabel("Tanggal")
-        ax2.set_ylabel("Harga (USD)")
-        ax2.set_title(f"Prediksi Exponential Smoothing untuk {selected_coin.capitalize()}")
-        ax2.legend()
-        plt.tight_layout()
-        st.pyplot(fig2)
-        
-        fig3, ax3 = plt.subplots(figsize=(10,6))
-        ax3.plot(prices_series.index, prices_series, label="Data Historis")
-        ax3.plot(forecast_dates, forecast_lstm, label="Prediksi LSTM", color="orange", marker="o")
-        ax3.set_xlabel("Tanggal")
-        ax3.set_ylabel("Harga (USD)")
-        ax3.set_title(f"Prediksi LSTM untuk {selected_coin.capitalize()}")
-        ax3.legend()
-        plt.tight_layout()
-        st.pyplot(fig3)
-        
-        # --- Rekomendasi Preskriptif ---
+        # Optimisasi Keputusan dengan MILP (Pyomo)
         last_forecast_value = forecast_arima[-1]
-        recommendation = generate_recommendation(current_price, last_forecast_value)
+        decision, profit = optimize_decision(current_price, last_forecast_value, threshold=0.02)
+        st.subheader("Optimisasi Keputusan (MILP dengan Pyomo)")
         st.write(f"Harga saat ini: {current_price:.2f} USD")
         st.write(f"Nilai prediksi periode terakhir (ARIMA): {last_forecast_value:.2f} USD")
-        st.write(recommendation)
+        st.write(f"Keputusan yang dioptimalkan: {decision}")
+        st.write(f"Profit (objective value): {profit:.2f}")
+        
+        # Rekomendasi non-optimasi (opsional)
+        recommendation = generate_recommendation(current_price, last_forecast_value, threshold=0.02)
+        st.write("Rekomendasi non-optimasi:", recommendation)
+        
     else:
         st.info("Data historis terlalu sedikit untuk prediksi.")
 else:
     st.warning("Gagal mengambil data historis untuk coin yang dipilih.")
 
-# Daftar Semua Coins (Opsional)
-st.header("Daftar Semua Coins")
-coins_list = fetch_coins_list()
-if coins_list:
-    st.write(f"Total coins: {len(coins_list)}")
-    st.dataframe(pd.DataFrame(coins_list).head(10))
-else:
-    st.error("Gagal mengambil daftar coins.")
 
 st.markdown("Data diambil dari [CoinGecko](https://www.coingecko.com/).")
